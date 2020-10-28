@@ -2,10 +2,12 @@ package com.example.navigationmap;
 
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
+import android.view.View;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.LinearLayoutCompat;
 
 import com.google.android.material.button.MaterialButton;
 import com.mapbox.android.core.permissions.PermissionsListener;
@@ -54,6 +56,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 	private NavigationMapRoute navigationMapRoute;
 	private MaterialButton button;
 	private MaterialButton autoBtn;
+	private LinearLayoutCompat btnGrp;
 	
 	@Override
 	protected void onCreate ( Bundle savedInstanceState ) {
@@ -65,6 +68,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 		mapView = findViewById ( R.id.mapView );
 		button = findViewById ( R.id.startButton );
 		autoBtn = findViewById ( R.id.autoBtn );
+		btnGrp = findViewById ( R.id.btnGrp );
 		
 		button.setEnabled ( false );
 		autoBtn.setEnabled ( false );
@@ -75,7 +79,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 		mapView.getMapAsync ( this );
 		
 		
-		button.setOnClickListener ( view -> {
+		button.setOnClickListener ( ( View view ) -> {
 			try {
 				NavigationLauncherOptions options = NavigationLauncherOptions.builder ( )
 						.directionsRoute ( currentRoute )
@@ -123,6 +127,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 				}
 				
 				getRoute ( originPoint , destinationPoint );
+				btnGrp.setVisibility ( View.VISIBLE );
 				return true;
 			} );
 			
