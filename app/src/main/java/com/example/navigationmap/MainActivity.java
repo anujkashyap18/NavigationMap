@@ -1,28 +1,55 @@
 package com.example.navigationmap;
 
+import android.Manifest;
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.drawable.Drawable;
+import android.location.Location;
+import android.location.LocationManager;
 import android.os.Bundle;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.LinearLayoutCompat;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import com.google.android.material.button.MaterialButton;
 import com.mapbox.android.core.permissions.PermissionsListener;
 import com.mapbox.android.core.permissions.PermissionsManager;
 import com.mapbox.api.directions.v5.models.DirectionsResponse;
 import com.mapbox.api.directions.v5.models.DirectionsRoute;
+import com.mapbox.api.geocoding.v5.models.CarmenFeature;
 import com.mapbox.geojson.Feature;
+import com.mapbox.geojson.FeatureCollection;
 import com.mapbox.geojson.Point;
 import com.mapbox.mapboxsdk.Mapbox;
+import com.mapbox.mapboxsdk.annotations.Icon;
+import com.mapbox.mapboxsdk.annotations.IconFactory;
+import com.mapbox.mapboxsdk.annotations.Marker;
+import com.mapbox.mapboxsdk.annotations.MarkerOptions;
+import com.mapbox.mapboxsdk.camera.CameraUpdateFactory;
+import com.mapbox.mapboxsdk.geometry.LatLng;
 import com.mapbox.mapboxsdk.location.LocationComponent;
 import com.mapbox.mapboxsdk.location.modes.CameraMode;
 import com.mapbox.mapboxsdk.maps.MapView;
 import com.mapbox.mapboxsdk.maps.MapboxMap;
 import com.mapbox.mapboxsdk.maps.OnMapReadyCallback;
 import com.mapbox.mapboxsdk.maps.Style;
+import com.mapbox.mapboxsdk.plugins.places.autocomplete.PlaceAutocomplete;
+import com.mapbox.mapboxsdk.plugins.places.autocomplete.model.PlaceOptions;
+import com.mapbox.mapboxsdk.style.layers.LineLayer;
+import com.mapbox.mapboxsdk.style.layers.Property;
 import com.mapbox.mapboxsdk.style.layers.SymbolLayer;
 import com.mapbox.mapboxsdk.style.sources.GeoJsonSource;
 import com.mapbox.services.android.navigation.ui.v5.NavigationLauncher;
@@ -43,20 +70,34 @@ import timber.log.Timber;
 import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.iconAllowOverlap;
 import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.iconIgnorePlacement;
 import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.iconImage;
+import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.lineCap;
+import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.lineColor;
+import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.lineJoin;
+import static com.mapbox.mapboxsdk.style.layers.PropertyFactory.lineWidth;
 
 @SuppressWarnings ( { "deprecation" ,
 		"MissingPermission" } )
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback, PermissionsListener {
 	
+	private static final String ROUTE_LAYER_ID = "route-layer-id";
+	private static final String ROUTE_SOURCE_ID = "route-source-id";
+	private static final String ICON_SOURCE_ID = "icon-source-id";
+	PlaceOptions.Builder placeOptions;
+	CarmenFeature feature;
+	Marker current, dest;
+	LocationManager locationManager;
+	Point origin, destination;
+	String[] perms = { Manifest.permission.INTERNET , Manifest.permission.ACCESS_FINE_LOCATION };
+	int x = 0;
 	private MapView mapView;
 	private MapboxMap mapboxMap;
 	private PermissionsManager permissionsManager;
 	private LocationComponent locationComponent;
 	private DirectionsRoute currentRoute;
 	private NavigationMapRoute navigationMapRoute;
-	private MaterialButton button;
-	private MaterialButton autoBtn;
+	private MaterialButton button, autoBtn;
 	private LinearLayoutCompat btnGrp;
+	private ImageView search;
 	
 	@Override
 	protected void onCreate ( Bundle savedInstanceState ) {
@@ -69,6 +110,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 		button = findViewById ( R.id.startButton );
 		autoBtn = findViewById ( R.id.autoBtn );
 		btnGrp = findViewById ( R.id.btnGrp );
+		search = findViewById ( R.id.search );
 		
 		button.setEnabled ( false );
 		autoBtn.setEnabled ( false );
@@ -77,6 +119,26 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 		
 		mapView.onCreate ( savedInstanceState );
 		mapView.getMapAsync ( this );
+		
+		placeOptions = PlaceOptions.builder ( );
+		placeOptions.limit ( 10 )
+				.country ( "IN" )
+				.backgroundColor ( this.getResources ( ).getColor ( R.color.white ) )
+				.build ( PlaceOptions.MODE_CARDS );
+		
+		search.setOnClickListener ( new View.OnClickListener ( ) {
+			@Override
+			public void onClick ( View view ) {
+				Intent intent = new PlaceAutocomplete.IntentBuilder ( )
+						.accessToken ( "pk.eyJ1Ijoic3RhcnRvLXRheGkiLCJhIjoiY2tlNDZ6amxjMHE2azJ0bzRvcmVhcTZkcyJ9.RmcFBGdhI8rqjl-suodU0A" )
+						.placeOptions ( placeOptions.build ( ) )
+						.build ( MainActivity.this );
+				btnGrp.setVisibility ( View.VISIBLE );
+				startActivityForResult ( intent , 11 );
+			}
+		} );
+		
+		locationManager = ( LocationManager ) getSystemService ( Context.LOCATION_SERVICE );
 		
 		
 		button.setOnClickListener ( ( View view ) -> {
@@ -103,6 +165,71 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 				Timber.d ( "Exception : %s" , e.getLocalizedMessage ( ) );
 			}
 		} );
+	}
+	
+	@Override
+	protected void onActivityResult ( int requestCode , int resultCode , @Nullable Intent data ) {
+		super.onActivityResult ( requestCode , resultCode , data );
+		if ( resultCode == Activity.RESULT_OK && requestCode == 11 ) {
+			feature = PlaceAutocomplete.getPlace ( data );
+			
+			if ( mapboxMap != null ) {
+				if ( ActivityCompat.checkSelfPermission ( this , Manifest.permission.ACCESS_FINE_LOCATION ) != PackageManager.PERMISSION_GRANTED
+						&& ActivityCompat.checkSelfPermission ( this , Manifest.permission.ACCESS_COARSE_LOCATION ) != PackageManager.PERMISSION_GRANTED ) {
+					return;
+				}
+				
+				Location locationGPS = locationManager.getLastKnownLocation ( LocationManager.NETWORK_PROVIDER );
+				double lat = locationGPS.getLatitude ( );
+				double lon = locationGPS.getLongitude ( );
+				
+				origin = Point.fromLngLat ( lon , lat );
+				destination = Point.fromLngLat ( ( ( Point ) feature.geometry ( ) ).longitude ( ) , ( ( Point ) feature.geometry ( ) ).latitude ( ) );
+			}
+			mapboxMap.setStyle ( Style.MAPBOX_STREETS , style -> {
+				
+				IconFactory iconFactory = IconFactory.getInstance ( MainActivity.this );
+				Icon pickup = iconFactory.fromBitmap ( bitmapDescriptorFromVector ( MainActivity.this ) );
+				Icon dropoff = iconFactory.fromBitmap ( bitmapDescriptorFromVector ( MainActivity.this ) );
+				initSource ( style );
+				initLayers ( style );
+				getRoute ( origin , destination );
+				
+				mapboxMap.animateCamera ( CameraUpdateFactory.newLatLngZoom ( new LatLng ( origin.latitude ( ) , origin.longitude ( ) ) , 11 ) , 1200 );
+
+//				current = mapboxMap.addMarker (
+//						new MarkerOptions ( ).title ( "Current Location" ).position ( new LatLng ( origin.latitude ( ) , origin.longitude ( ) ) ).icon ( pickup ) );
+//				current.getInfoWindow ( );
+//
+//				dest = new Marker ( new MarkerOptions ( ) );
+//
+//				dest.remove ( );
+//
+//				dest = mapboxMap.addMarker (
+//						new MarkerOptions ( ).title ( "Destination" )
+//								.position ( new LatLng ( destination.latitude ( ) , destination.longitude ( ) ) ).icon ( dropoff ) );
+//				dest.getInfoWindow ( );
+				current = new Marker (
+						new MarkerOptions ( ).title ( "Current Location" ).position (
+								new LatLng ( origin.latitude ( ) , origin.longitude ( ) ) ).icon ( pickup ) );
+				
+				mapboxMap.updateMarker ( current );
+				
+				if ( x == 0 ) {
+					dest = mapboxMap.addMarker (
+							new MarkerOptions ( ).title ( "Destination" )
+									.position ( new LatLng ( destination.latitude ( ) , destination.longitude ( ) ) ).icon ( dropoff ) );
+					x++;
+				}
+				else {
+					mapboxMap.removeMarker ( dest );
+					dest = mapboxMap.addMarker (
+							new MarkerOptions ( ).title ( "Destination" )
+									.position ( new LatLng ( destination.latitude ( ) , destination.longitude ( ) ) ).icon ( dropoff ) );
+					mapboxMap.updateMarker ( dest );
+				}
+			} );
+		}
 	}
 	
 	@Override
@@ -134,6 +261,16 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 		} );
 		
 	}
+	
+	private Bitmap bitmapDescriptorFromVector ( Context mainActivity ) {
+		Drawable background = ContextCompat.getDrawable ( mainActivity , R.drawable.ic_baseline_pin_drop_24 );
+		background.setBounds ( 0 , 0 , background.getIntrinsicWidth ( ) , background.getIntrinsicHeight ( ) );
+		Bitmap bitmap = Bitmap.createBitmap ( background.getIntrinsicWidth ( ) , background.getIntrinsicHeight ( ) , Bitmap.Config.ARGB_8888 );
+		Canvas canvas = new Canvas ( bitmap );
+		background.draw ( canvas );
+		return bitmap;
+	}
+	
 	
 	private void addDestinationIconSymbolLayer ( @NonNull Style loadedMapStyle ) {
 		
@@ -215,6 +352,29 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 			permissionsManager = new PermissionsManager ( this );
 			permissionsManager.requestLocationPermissions ( this );
 		}
+	}
+	
+	
+	private void initSource ( @NonNull Style loadedMapStyle ) {
+		loadedMapStyle.addSource ( new GeoJsonSource ( ROUTE_SOURCE_ID ) );
+		GeoJsonSource iconGeoJsonSource = new GeoJsonSource ( ICON_SOURCE_ID , FeatureCollection.fromFeatures ( new Feature[] {
+				Feature.fromGeometry ( Point.fromLngLat ( origin.longitude ( ) , origin.latitude ( ) ) ) ,
+				Feature.fromGeometry ( Point.fromLngLat ( destination.longitude ( ) , destination.latitude ( ) ) ) } ) );
+		loadedMapStyle.addSource ( iconGeoJsonSource );
+	}
+	
+	private void initLayers ( @NonNull Style loadedMapStyle ) {
+		LineLayer routeLayer = new LineLayer ( ROUTE_LAYER_ID , ROUTE_SOURCE_ID );
+		
+		routeLayer.setProperties (
+				lineCap ( Property.LINE_CAP_ROUND ) ,
+				lineJoin ( Property.LINE_JOIN_ROUND ) ,
+				lineWidth ( 5f ) ,
+				lineColor ( Color.parseColor ( "#ffbc01" ) )
+		);
+		loadedMapStyle.addLayer ( routeLayer );
+		
+		
 	}
 	
 	@Override
